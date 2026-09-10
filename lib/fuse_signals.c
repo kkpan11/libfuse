@@ -5,7 +5,7 @@
   Utility functions for setting signal handlers.
 
   This program can be distributed under the terms of the GNU LGPLv2.
-  See the file COPYING.LIB
+  See the file LGPL2.txt
 */
 
 #include "fuse_config.h"
@@ -22,13 +22,20 @@
 #include <execinfo.h>
 #endif
 
+/*
+ * Must not handle SIGCANCEL, as that is used to wake up threads from
+ * syscalls reading requests from /dev/fuse
+ */
 static int teardown_sigs[] = { SIGHUP, SIGINT, SIGTERM };
+
 static int ignore_sigs[] = { SIGPIPE};
 static int fail_sigs[] = { SIGILL, SIGTRAP, SIGABRT, SIGBUS, SIGFPE, SIGSEGV };
 static struct fuse_session *fuse_instance;
 
+#ifdef HAVE_BACKTRACE
 #define BT_STACK_SZ (1024 * 1024)
 static void *backtrace_buffer[BT_STACK_SZ];
+#endif
 
 static void dump_stack(void)
 {
@@ -53,8 +60,14 @@ static void dump_stack(void)
 
 static void exit_handler(int sig)
 {
-	if (fuse_instance == NULL)
+	if (fuse_instance == NULL) {
+		fuse_log(FUSE_LOG_ERR, "fuse_instance is NULL\n");
 		return;
+	}
+
+	if (fuse_instance->debug)
+		fuse_log(FUSE_LOG_ERR, "exit_handler called with sig %d\n",
+			 sig);
 
 	fuse_session_exit(fuse_instance);
 
@@ -63,7 +76,6 @@ static void exit_handler(int sig)
 				"assertion error: signal value <= 0\n");
 		dump_stack();
 		abort();
-		fuse_instance->error = sig;
 	}
 
 	fuse_instance->error = sig;
@@ -111,7 +123,7 @@ static int set_one_signal_handler(int sig, void (*handler)(int), int remove)
 	return 0;
 }
 
-static int _fuse_set_signal_handlers(int signals[], int nr_signals,
+static int _fuse_set_signal_handlers(const int signals[], int nr_signals,
 				     void (*handler)(int))
 {
 	for (int idx = 0; idx < nr_signals; idx++) {
@@ -150,8 +162,13 @@ int fuse_set_signal_handlers(struct fuse_session *se)
 	if (rc < 0)
 		return rc;
 
-	if (fuse_instance == NULL)
-		fuse_instance = se;
+	/*
+	 * needs to be set independently if already set, as some  applications
+	 * may have multiple sessions and might rely on traditional behavior
+	 * that the last session is used.
+	 */
+	fuse_instance = se;
+
 	return 0;
 }
 
@@ -164,20 +181,20 @@ int fuse_set_fail_signal_handlers(struct fuse_session *se)
 	if (rc < 0)
 		return rc;
 
-	if (fuse_instance == NULL)
-		fuse_instance = se;
+	/* See fuse_set_signal_handlers, why set unconditionally */
+	fuse_instance = se;
 
 	return 0;
 }
 
-static void _fuse_remove_signal_handlers(int signals[], int nr_signals,
+static void _fuse_remove_signal_handlers(const int signals[], int nr_signals,
 					 void (*handler)(int))
 {
 	for (int idx = 0; idx < nr_signals; idx++)
 		set_one_signal_handler(signals[idx], handler, 1);
 }
 
-void fuse_remove_signal_handlers(struct fuse_session *se)
+void fuse_remove_signal_handlers(const struct fuse_session *se)
 {
 	size_t nr_signals;
 

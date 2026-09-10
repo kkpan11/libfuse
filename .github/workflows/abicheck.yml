@@ -5,10 +5,11 @@ on:
   push:
     branches:
       - master
+      - 'fuse-[0-9]+.[0-9]+*'  # This will match branches like 3.17, 3.18, 4.0, etc.
   pull_request:
     branches:
       - master
-
+      - 'fuse-[0-9]+.[0-9]+*'
 permissions:
   contents: read
 
@@ -21,43 +22,28 @@ jobs:
           - ubuntu-latest
 
     steps:
-      - name: Install dependencies (Ubuntu)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get -y install abigail-tools clang gcc
-
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: current
 
-      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      - name: Install dependencies (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          ./current/.github/workflows/install-ubuntu-dependencies.sh --abicheck
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: previous
           ref: ${{ github.event.pull_request.base.ref }}
 
-      - uses: actions/setup-python@f677139bbe7f9c59b41e40162b753c062f5d49a3 # v5.2.0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
-      - name: Build current
-        working-directory: current
+      - name: Install Python dependencies
         run: |
-          pip install -r requirements.txt
-          meson setup build --buildtype=debug
-          meson compile -C build
+          pip install -r current/requirements.txt
 
-      - name: Build previous
-        working-directory: previous
+      - name: Run ABI check
         run: |
-          echo "Commit-id before PR: $(git show HEAD)"
-          pip install -r requirements.txt
-          meson setup build --buildtype=debug
-          meson compile -C build
-
-      - name: Run abidiff
-        run: abidiff 
-          --headers-dir1 previous/include/ 
-          --headers-dir2 current/include/ 
-          previous/build/lib/libfuse3.so 
-          current/build/lib/libfuse3.so
+          current/.github/workflows/abicheck.sh --current-dir current --previous-dir previous

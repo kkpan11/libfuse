@@ -3,7 +3,7 @@
   Copyright (C) 2001-2007  Miklos Szeredi <miklos@szeredi.hu>
 
   This program can be distributed under the terms of the GNU GPLv2.
-  See the file COPYING.
+  See the file GPL2.txt.
 */
 
 /** @file
@@ -55,8 +55,15 @@ static const struct fuse_opt option_spec[] = {
 static void *hello_init(struct fuse_conn_info *conn,
 			struct fuse_config *cfg)
 {
-	(void) conn;
+	/* Always replies inline on the io-uring worker thread */
+	fuse_set_conn_flag(conn, FUSE_CONN_FLAG_SINGLE_ISSUER);
+
 	cfg->kernel_cache = 1;
+
+	/* Test setting flags the old way */
+	fuse_set_feature_flag(conn, FUSE_CAP_ASYNC_READ);
+	fuse_unset_feature_flag(conn, FUSE_CAP_ASYNC_READ);
+
 	return NULL;
 }
 
